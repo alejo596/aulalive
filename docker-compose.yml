@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. Base de Datos PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: aulalive_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword2026
+      POSTGRES_DB: aulalive_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/prisma/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aulalive_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Servidor Backend (Node.js, Express, TypeScript, Socket.IO, Prisma)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aulalive_backend
+    restart: always
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://postgres:postgrespassword2026@postgres:5432/aulalive_db?schema=public"
+      JWT_SECRET: "aulalive_super_secret_jwt_key_2026"
+      CLIENT_URL: "http://localhost:5173"
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma db push && npm run prisma:seed && npm start"
+
+  # 3. Frontend Web (React, TypeScript, Tailwind CSS, Vite/Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aulalive_frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+    driver: local
+

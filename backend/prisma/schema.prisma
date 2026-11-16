@@ -1,0 +1,291 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum RoleType {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+  WORD_CLOUD
+  LIKERT
+  POLL
+  ORDERING
+}
+
+enum SessionStatus {
+  LOBBY
+  ACTIVE
+  PAUSED
+  FINISHED
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleType @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  firstName    String    @map("first_name")
+  lastName     String    @map("last_name")
+  rut          String?   @unique
+  roleId       String    @map("role_id")
+  role         Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  enrollments         Enrollment[]
+  hostedQuizzes       Quiz[]               @relation("TeacherQuizzes")
+  hostedLiveSessions  LiveSession[]        @relation("TeacherLiveSessions")
+  sessionParticipants SessionParticipant[]
+  auditLogs           AuditLog[]
+
+  @@index([roleId])
+  @@index([email])
+  @@map("users")
+}
+
+model Course {
+  id           String       @id @default(uuid())
+  code         String       @unique
+  name         String
+  description  String?
+  academicYear Int          @map("academic_year")
+  semester     Int          @default(1)
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  subjects     Subject[]
+  enrollments  Enrollment[]
+
+  @@map("courses")
+}
+
+model Subject {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  courseId    String   @map("course_id")
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  quizzes     Quiz[]
+
+  @@index([courseId])
+  @@map("subjects")
+}
+
+model Enrollment {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  courseId   String   @map("course_id")
+  enrolledAt DateTime @default(now()) @map("enrolled_at")
+  status     String   @default("ACTIVE") // ACTIVE, SUSPENDED, COMPLETED
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+  @@map("enrollments")
+}
+
+model Quiz {
+  id                    String      @id @default(uuid())
+  title                 String
+  description           String?
+  code                  String      @unique @default(cuid())
+  teacherId             String      @map("teacher_id")
+  teacher               User        @relation("TeacherQuizzes", fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId             String?     @map("subject_id")
+  subject               Subject?    @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  isPublished           Boolean     @default(false) @map("is_published")
+  timeLimitSec          Int         @default(30) @map("time_limit_sec")
+  isAnonymous           Boolean     @default(false) @map("is_anonymous")
+  allowInstantFeedback  Boolean     @default(true) @map("allow_instant_feedback")
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+
+  questions    Question[]
+  liveSessions LiveSession[]
+
+  @@index([teacherId])
+  @@index([subjectId])
+  @@map("quizzes")
+}
+
+model Question {
+  id           String       @id @default(uuid())
+  quizId       String       @map("quiz_id")
+  quiz         Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  orderNum     Int          @default(1) @map("order_num")
+  text         String
+  type         QuestionType @default(SINGLE_CHOICE)
+  points       Int          @default(100)
+  timeLimitSec Int          @default(20) @map("time_limit_sec")
+  imageUrl     String?      @map("image_url")
+  explanation  String?
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  answerOptions AnswerOption[]
+  responses     Response[]
+
+  @@index([quizId])
+  @@index([orderNum])
+  @@map("questions")
+}
+
+model AnswerOption {
+  id         String   @id @default(uuid())
+  questionId String   @map("question_id")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  orderNum   Int      @default(1) @map("order_num")
+  text       String
+  isCorrect  Boolean  @default(false) @map("is_correct")
+  weight     Float    @default(1.0)
+  imageUrl   String?  @map("image_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  responses Response[]
+
+  @@index([questionId])
+  @@map("answer_options")
+}
+
+model LiveSession {
+  id                   String        @id @default(uuid())
+  quizId               String        @map("quiz_id")
+  quiz                 Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  hostTeacherId        String        @map("host_teacher_id")
+  hostTeacher          User          @relation("TeacherLiveSessions", fields: [hostTeacherId], references: [id], onDelete: Cascade)
+  pinCode              String        @unique @map("pin_code") // 6-digit numeric PIN
+  qrCodeUrl            String?       @map("qr_code_url")
+  status               SessionStatus @default(LOBBY)
+  currentQuestionId    String?       @map("current_question_id")
+  currentQuestionIndex Int           @default(0) @map("current_question_index")
+  isShowingResults     Boolean       @default(false) @map("is_showing_results")
+  isShowingCorrect     Boolean       @default(false) @map("is_showing_correct")
+  startedAt            DateTime?     @map("started_at")
+  endedAt              DateTime?     @map("ended_at")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  participants SessionParticipant[]
+  responses    Response[]
+  scores       Score[]
+
+  @@index([pinCode])
+  @@index([quizId])
+  @@index([hostTeacherId])
+  @@map("live_sessions")
+}
+
+model SessionParticipant {
+  id                String       @id @default(uuid())
+  sessionId         String       @map("session_id")
+  session           LiveSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId            String?      @map("user_id")
+  user              User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  nickname          String
+  studentIdentifier String?      @map("student_identifier") // RUT or Student ID
+  socketId          String?      @map("socket_id")
+  isConnected       Boolean      @default(true) @map("is_connected")
+  joinedAt          DateTime     @default(now()) @map("joined_at")
+  lastActiveAt      DateTime     @default(now()) @map("last_active_at")
+
+  responses Response[]
+  score     Score?
+
+  @@unique([sessionId, nickname])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([socketId])
+  @@map("session_participants")
+}
+
+model Response {
+  id               String             @id @default(uuid())
+  sessionId        String             @map("session_id")
+  session          LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId    String             @map("participant_id")
+  participant      SessionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  questionId       String             @map("question_id")
+  question         Question           @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOptionId String?            @map("selected_option_id")
+  selectedOption   AnswerOption?      @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
+  textResponse     String?            @map("text_response") // For short answer, word cloud, survey
+  orderingResponse Json?              @map("ordering_response") // Array of option IDs in user's chosen order
+  isCorrect        Boolean            @default(false) @map("is_correct")
+  pointsEarned     Int                @default(0) @map("points_earned")
+  responseTimeMs   Int                @default(0) @map("response_time_ms")
+  submittedAt      DateTime           @default(now()) @map("submitted_at")
+
+  @@unique([sessionId, participantId, questionId])
+  @@index([sessionId])
+  @@index([participantId])
+  @@index([questionId])
+  @@map("responses")
+}
+
+model Score {
+  id               String             @id @default(uuid())
+  sessionId        String             @map("session_id")
+  session          LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId    String             @unique @map("participant_id")
+  participant      SessionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  totalScore       Int                @default(0) @map("total_score")
+  correctAnswers   Int                @default(0) @map("correct_answers")
+  incorrectAnswers Int                @default(0) @map("incorrect_answers")
+  averageTimeMs    Int                @default(0) @map("average_time_ms")
+  rank             Int                @default(0)
+  finalGrade       Float              @default(1.0) @map("final_grade") // Scale 1.0 to 7.0
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@index([sessionId])
+  @@map("scores")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String   // e.g. AUTH_LOGIN, CREATE_QUIZ, START_SESSION, SUBMIT_RESPONSE, EXPORT_REPORT
+  entityType String   @map("entity_type") // e.g. User, Quiz, LiveSession, Report
+  entityId   String?  @map("entity_id")
+  details    Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
